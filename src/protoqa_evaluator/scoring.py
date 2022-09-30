@@ -12,6 +12,11 @@ from nltk.corpus import stopwords
 from nltk.corpus import wordnet as wn
 from scipy.optimize import linear_sum_assignment
 
+import fasttext.util
+
+import gensim
+from gensim.models import Word2Vec
+
 __all__ = [
     "all_pairs_scores",
     "get_optimal_score",
@@ -19,8 +24,14 @@ __all__ = [
     "longest_common_substring_score",
     "longest_common_subsequence_score",
     "wordnet_synsets_score",
+    "fasttext_synsets_score",
+    # "word2vec_partition_score",
     "wordnet_partition_score",
+    "fasttext_partition_score",
+    # "word2vec_synsets_score",
     "wordnet_score",
+    "fasttext_score",
+    "word2vec_score",
     "wup_similarity_wrapper",
     "wordnet_wup_synset_score",
     "wordnet_wup_partition_score",
@@ -35,14 +46,62 @@ nltk.download("punkt")
 nltk.download("wordnet")
 
 EN_STOPWORDS = frozenset(stopwords.words("english"))
-
+fasttext.util.download_model('en', if_exists='ignore')  # English
+ft = fasttext.load_model('cc.en.300.bin')
 
 def all_pairs_scores(
     a: Union[str, Iterable],
     b: Union[str, Iterable],
     score_func: Callable,
     reduction_func: Callable = lambda z: z,
+    preprocess_func: Callable = lambda z: [z] if isinstance(z, str) else z
+) -> Union[np.ndarray, float]:
+    """
+    Generic function for pairwise comparisons. Takes strings or iterables a and b and
+    a score function and returns the matrix of all pairwise scores between a and b.
+
+    :param a: Typically a string or iterable of strings to compare with b.
+    :param b: Typically a string or iterable of strings to compare with a.
+    :param score_func: Function which accepts two arguments (a,b) and returns their score in [0,1]
+    :param reduction_func: Function which accepts a matrix and (typically) returns a scalar
+    :param preprocess_func: Function which is run on both a and b prior to anything else
+    :param kwargs: passed on to the score_func
+    :return: Matrix of pairwise scores or output of reduction function on this matrix
+    """
+    a_new, b_new = a, b
+    a, b = preprocess_func(a), preprocess_func(b)
+    if len(a) == 0 or len(b) == 0:
+        return 0.0
+    # if len(a) == 300 and len(b) == 300:
+    #     if compute_cosine_similarity(a, b) > 0.5:
+    #         return 1
+    #     else:
+    #         return 0
+    if len(a) == 300 and len(b) == 300:
+        if a_new in ft.get_nearest_neighbors(b_new, 10):
+            return 1
+        else:
+            return 0
+    score_matrix = np.zeros((len(a), len(b)))
+    for (a_idx, a_val), (b_idx, b_val) in product(enumerate(a), enumerate(b)):
+        score_val = score_func(a_val, b_val)
+        score_matrix[a_idx, b_idx] = score_val
+        if not (0 <= score_val <= 1):
+            warnings.warn(
+                f"Score function did not return a value in [0,1]: "
+                f"score_func({a_val}, {b_val}) = {score_val} with type {type(score_val)}"
+            )
+
+    return reduction_func(score_matrix)
+
+def all_pairs_scores_general(
+    a: Union[str, Iterable],
+    b: Union[str, Iterable],
+    ranking: str,
+    score_func: Callable,
+    reduction_func: Callable = lambda z: z,
     preprocess_func: Callable = lambda z: [z] if isinstance(z, str) else z,
+    max_answers=None,
 ) -> Union[np.ndarray, float]:
     """
     Generic function for pairwise comparisons. Takes strings or iterables a and b and
@@ -68,8 +127,23 @@ def all_pairs_scores(
                 f"Score function did not return a value in [0,1]: "
                 f"score_func({a_val}, {b_val}) = {score_val} with type {type(score_val)}"
             )
-    return reduction_func(score_matrix)
+    if ranking == 'oracle':
+        counter = 0
+        for answers, count in b.items():
+            score_matrix[:, counter] *= count
+            counter += 1
+        score_matrix = np.append(score_matrix, np.zeros((score_matrix.shape[0], 1)), axis=1)
+        for row in score_matrix:
+            row[-1] = np.sum(row)
+        score_matrix = score_matrix[score_matrix[:, score_matrix.shape[1] - 1].argsort()[::-1]]
+        score_matrix = np.delete(score_matrix, np.s_[-1:], axis=1)
 
+    if max_answers != None:
+        score_matrix = score_matrix[:max_answers]
+
+    score_matrix = np.array(score_matrix > 0).astype(int)
+
+    return reduction_func(score_matrix)
 
 ##########################################################################
 # Functions which take in a score matrix and return the actual score
@@ -113,6 +187,40 @@ wordnet_synsets_score.__docs__ = (
 )
 
 
+fasttext_synsets_score = partial(
+    all_pairs_scores,
+    score_func=lambda a, b: 1.0 if a ==b else 0.0,
+    reduction_func=np.max,
+    preprocess_func=lambda z: ft.get_word_vector(z.replace(" ", "_")),
+    # preprocess_func=lambda z: z.replace(" ", "_"),
+)
+
+
+def compute_cosine_similarity(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    cosine_similarity = np.dot(a, b)/(np.linalg.norm(a) * np.linalg.norm(b))
+    return cosine_similarity
+
+
+fasttext_synsets_score.__name__ = "fasttext_synsets_score"
+fasttext_synsets_score.__docs__ = (
+    "Takes in a pair of strings which each get mapped to corresponding synsets, "
+    "then returns the max similarity score between over any pairing of these synsets."
+)
+
+# word2vec_synsets_score = partial(
+#     all_pairs_scores,
+#     score_func=lambda a, b: 1.0 - word2vec.wv.similarity(a, b),
+#     reduction_func=np.max,
+#     preprocess_func=lambda z: z.replace(" ", "_"),
+# )
+# word2vec_synsets_score.__name__ = "word2vec_synsets_score"
+# word2vec_synsets_score.__docs__ = (
+#     "Takes in a pair of strings which each get mapped to corresponding synsets, "
+#     "then returns the max similarity score between over any pairing of these synsets."
+# )
+
 ##########################################################################
 # Functions which take an iterable of pred_answers and true_answers,
 # calculate a score matrix of the pairwise combinations, and return a float
@@ -128,6 +236,28 @@ wordnet_partition_score.__docs__ = (
     "the parts of these partitions based on WordNet synsets or exact string match."
 )
 
+
+fasttext_partition_score = partial(
+    all_pairs_scores,
+    score_func=lambda a, b: max(fasttext_synsets_score(a, b), exact_match(a, b)),
+    reduction_func=lambda z: get_optimal_score(z)[0] / max(z.shape),
+)
+fasttext_partition_score.__name__ = "fasttext_partition_score"
+fasttext_partition_score.__docs__ = (
+    "Takes in a pair of partitions (List[str]) and computes the optimal matching between "
+    "the parts of these partitions based on WordNet synsets or exact string match."
+)
+
+# word2vec_partition_score = partial(
+#     all_pairs_scores,
+#     score_func=lambda a, b: max(word2vec_synsets_score(a, b), exact_match(a, b)),
+#     reduction_func=lambda z: get_optimal_score(z)[0] / max(z.shape),
+# )
+# word2vec_partition_score.__name__ = "word2vec_partition_score"
+# word2vec_partition_score.__docs__ = (
+#     "Takes in a pair of partitions (List[str]) and computes the optimal matching between "
+#     "the parts of these partitions based on WordNet synsets or exact string match."
+# )
 
 def wordnet_score(
     pred_answer: str,
@@ -152,6 +282,53 @@ def wordnet_score(
         pred_answer, true_answer, score_func, reduction_func, _preprocess
     )
 
+
+def fasttext_score(
+    pred_answer: str,
+    true_answer: str,
+    score_func: Callable = fasttext_partition_score,
+    reduction_func: Callable = np.max,
+    *,
+    stopwords=EN_STOPWORDS,
+):
+    """
+    Fasttext score function for a predicted answer string and a true answer string.
+    Takes in strings, tokenizes them, and returns the score which corresponds to the optimal
+    partition of the original strings.
+    """
+
+    def _preprocess(z, stopwords=stopwords):
+        tokens = [tok for tok in word_tokenize(z) if tok not in stopwords]
+        parts = [[" ".join(tokens) for tokens in part] for part in partitions(tokens)]
+        return parts
+
+    return all_pairs_scores(
+        pred_answer, true_answer, score_func, reduction_func, _preprocess
+    )
+
+
+def word2vec_score(
+    pred_answer: str,
+    true_answer: str,
+    score_func: Callable = wordnet_partition_score,
+    reduction_func: Callable = np.max,
+    *,
+    stopwords=EN_STOPWORDS,
+):
+    """
+    Word2Vec score function for a predicted answer string and a true answer string.
+    Takes in strings, tokenizes them, and returns the score which corresponds to the optimal
+    partition of the original strings.
+    """
+
+    def _preprocess(z, stopwords=stopwords):
+        tokens = [tok for tok in word_tokenize(z) if tok not in stopwords]
+        parts = [[" ".join(tokens) for tokens in part] for part in partitions(tokens)]
+        return parts
+
+    return all_pairs_scores(
+        pred_answer, true_answer, score_func, reduction_func, _preprocess
+    )
 
 # Wu-Palmer Similarity (https://linguistics.stackexchange.com/questions/9084/what-do-wordnetsimilarity-scores-mean)
 def wup_similarity_wrapper(*args, **kwargs):
@@ -178,6 +355,7 @@ def cluster_score(
     question_string: str,
     score_func: Callable = exact_match,
     cluster_reduction_func: Callable = np.max,
+    max_answers=None,
 ) -> np.ndarray:
     true_ans, *_ = true_answers
     if isinstance(true_ans, frozenset):
@@ -186,7 +364,7 @@ def cluster_score(
             score_func=score_func,
             reduction_func=cluster_reduction_func,
         )
-    return all_pairs_scores(pred_answers, true_answers, score_func)
+    return all_pairs_scores_general(pred_answers, true_answers, 'oracle', score_func, max_answers=max_answers)
 
 
 ##########################################################################

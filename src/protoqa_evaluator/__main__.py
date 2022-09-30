@@ -147,7 +147,6 @@ def evaluate(
             )
             for k, v in eval_func_dict.items()
         }
-
     multiple_evals(
         eval_func_dict=eval_func_dict,
         question_data=targets,

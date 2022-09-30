@@ -2,13 +2,15 @@ from functools import partial
 
 import numpy as np
 from protoqa_evaluator.evaluation import general_eval
-from protoqa_evaluator.scoring import wordnet_score
+from protoqa_evaluator.scoring import wordnet_score, fasttext_score, word2vec_score
 
 __all__ = [
     "max_answers",
     "max_incorrect",
     "exact_match_all_eval_funcs",
     "wordnet_all_eval_funcs",
+    "fasttext_all_eval_funcs",
+    "word2vec_all_eval_funcs",
     "all_eval_funcs",
     "fast_money",
     "family_feud",
@@ -20,6 +22,7 @@ max_answers = {
     f"Max Answers - {k}": partial(general_eval, max_pred_answers=k)
     for k in [None, 1, 3, 5, 10]
 }
+
 max_incorrect = {
     f"Max Incorrect - {k}": partial(general_eval, max_incorrect=k)
     for k in [None, 1, 3, 5]
@@ -29,9 +32,27 @@ wordnet_all_eval_funcs = {
     k: partial(v, score_func=wordnet_score, score_matrix_transformation=np.round)
     for k, v in exact_match_all_eval_funcs.items()
 }
+
+wordnet_all_eval_funcs_oracle = {
+    k: partial(v, score_func=wordnet_score, score_matrix_transformation=np.round)
+    for k, v in exact_match_all_eval_funcs.items()
+}
+
+word2vec_all_eval_funcs = {
+    k: partial(v, score_func=word2vec_score, score_matrix_transformation=np.round)
+    for k, v in exact_match_all_eval_funcs.items()
+}
+
+fasttext_all_eval_funcs = {
+    k: partial(v, score_func=fasttext_score, score_matrix_transformation=np.round)
+    for k, v in exact_match_all_eval_funcs.items()
+}
+
 all_eval_funcs = {
     "exact_match": exact_match_all_eval_funcs,
     "wordnet": wordnet_all_eval_funcs,
+    "fasttext": fasttext_all_eval_funcs,
+    "word2vec": word2vec_all_eval_funcs
 }
 
 fast_money = partial(general_eval, max_pred_answers=1)

@@ -10,6 +10,7 @@ def multiple_evals(
     question_data: Dict[str, QuestionAndAnswerClusters],
     answers_dict: Dict[str, List[str]],
     optimal_ranking: bool = False,
+    ranking='oracle',
 ) -> Dict[str, Dict[str, float]]:
     eval_details = {}
     for name, eval_func in eval_func_dict.items():
@@ -19,6 +20,7 @@ def multiple_evals(
             question_data=question_data,
             answers_dict=answers_dict,
             optimal_ranking=optimal_ranking,
+            ranking=ranking,
         )
         eval_score = statistics.mean(x.score for x in eval_details[name].values())
         print(f"{name}: {eval_score}")
@@ -31,6 +33,7 @@ def evaluate(
     answers_dict: Dict[str, List[str]],
     data_preprocessing: Optional[Callable] = None,
     optimal_ranking: bool = False,
+    ranking='oracle',
 ) -> Dict[str, float]:
     scores = dict()
     for qid, pred_answers in answers_dict.items():
@@ -41,6 +44,7 @@ def evaluate(
         scores[qid] = evaluation_func(
             pred_answers,
             true_answers,
+            ranking=ranking,
             question_string=true_q.question,
             optimal_ranking=optimal_ranking,
         )
@@ -75,13 +79,16 @@ def general_eval(
     assign_cluster_scores: bool = True,
     calc_oracle_score: bool = True,
     optimal_ranking: bool = False,
+    ranking='oracle',
 ) -> EvalResult:
-    if max_pred_answers is not None and not optimal_ranking:
+    if max_pred_answers is not None and not optimal_ranking and (ranking != 'oracle' or not(calc_oracle_score)):
         pred_answers = pred_answers[:max_pred_answers]
+        #true_answers = {k: true_answers[k] for k in list(true_answers.keys())[: max_pred_answers]}
     pred_answers = [string_preprocessing(pred_answer) for pred_answer in pred_answers]
     score_matrix = cluster_score_func(
         pred_answers,
         true_answers,
+        max_answers=max_pred_answers,
         question_string=question_string,
         score_func=score_func,
         cluster_reduction_func=cluster_reduction_func,
