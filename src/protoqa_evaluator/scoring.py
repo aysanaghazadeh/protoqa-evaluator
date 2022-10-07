@@ -72,16 +72,31 @@ def all_pairs_scores(
     a, b = preprocess_func(a), preprocess_func(b)
     if len(a) == 0 or len(b) == 0:
         return 0.0
+    if len(a) == 300 and len(b) == 300:
+        a_words, b_words = a_new.split(' '), b_new.split(' ')
+        sum_a, sum_b = np.zeros((300)), np.zeros((300))
+        count = 0
+        for a_new in a_words:
+            sum_a += preprocess_func(a_new)
+            count += 1
+        average_a = sum_a / count
+        count = 0
+        for b_new in b_words:
+            sum_b += preprocess_func(b_new)
+            count += 1
+        average_b = sum_b / count
+        if compute_cosine_similarity(average_a, average_b) > 0.5:
+            return 1
+        # for a_new, b_new in product(a_words, b_words):
+        #     processed_a, processed_b = preprocess_func(a_new), preprocess_func(b_new)
+        #     if compute_cosine_similarity(processed_a, processed_b) > 0.5:
+        #         return 1
+        return 0
     # if len(a) == 300 and len(b) == 300:
-    #     if compute_cosine_similarity(a, b) > 0.5:
+    #     if a_new in ft.get_nearest_neighbors(b_new, 10):
     #         return 1
     #     else:
     #         return 0
-    if len(a) == 300 and len(b) == 300:
-        if a_new in ft.get_nearest_neighbors(b_new, 10):
-            return 1
-        else:
-            return 0
     score_matrix = np.zeros((len(a), len(b)))
     for (a_idx, a_val), (b_idx, b_val) in product(enumerate(a), enumerate(b)):
         score_val = score_func(a_val, b_val)
@@ -137,6 +152,19 @@ def all_pairs_scores_general(
             row[-1] = np.sum(row)
         score_matrix = score_matrix[score_matrix[:, score_matrix.shape[1] - 1].argsort()[::-1]]
         score_matrix = np.delete(score_matrix, np.s_[-1:], axis=1)
+        # new_score_matrix = score_matrix.copy()
+        row_index = 0
+        for column in score_matrix.T:
+            row = None
+            for i, cell in enumerate(column):
+                if cell != 0:
+                    row = i
+                    break
+            if row != None:
+                if row > row_index:
+                    score_matrix[row_index:row+1, :] = np.roll(score_matrix[row_index:row+1, :], shift=1, axis=0)
+                if row >= row_index:
+                    row_index += 1
 
     if max_answers != None:
         score_matrix = score_matrix[:max_answers]
